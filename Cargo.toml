@@ -1,0 +1,16 @@
+[package]
+name = "telegrambot"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "*"
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+teloxide = "0.12.2"
+log = "0.4"
+tokio = { version = "1", features = ["full"] }
+pretty_env_logger = "0.4"
+tari_utilities = "*"
+tokio-stream = { version = "*", features = ["sync"] }
