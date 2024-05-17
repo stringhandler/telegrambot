@@ -7,10 +7,13 @@ edition = "2021"
 
 [dependencies]
 anyhow = "*"
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+dotenv = "0.15.0"
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "st-add-burn-filter-grpc" }
 teloxide = "0.12.2"
 log = "0.4"
 tokio = { version = "1", features = ["full"] }
+regex = "*"
 pretty_env_logger = "0.4"
-tari_utilities = "*"
+tari_utilities = { version = "*", features = ["default", "std"] }
+tari_crypto = "0.20.1"
 tokio-stream = { version = "*", features = ["sync"] }
