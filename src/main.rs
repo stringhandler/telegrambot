@@ -4,12 +4,14 @@ use dotenv::dotenv;
 use minotari_node_grpc_client::grpc::FetchMatchingUtxosRequest;
 use minotari_node_grpc_client::grpc::SearchUtxosRequest;
 use minotari_node_grpc_client::BaseNodeGrpcClient;
+use regex::Regex;
 use rusqlite::params;
 use rusqlite::Connection;
 use tari_crypto::commitment;
 use tari_crypto::ristretto::{RistrettoComSig, RistrettoPublicKey, RistrettoSecretKey};
 use tari_utilities::hex::Hex;
 use tari_utilities::ByteArray;
+use teloxide::dispatching::dialogue::GetChatId;
 use teloxide::types::{Message, User};
 use teloxide::{prelude::*, RequestError};
 use tokio_stream::StreamExt;
@@ -88,7 +90,10 @@ use tokio_stream::StreamExt;
 use anyhow::anyhow;
 use tari_crypto::commitment::HomomorphicCommitment;
 
-async fn check_commitment_exists(commitment_and_signature: &str) -> Result<bool, anyhow::Error> {
+async fn check_commitment_exists(
+    commitment_and_signature: &str,
+    chat_id: ChatId,
+) -> Result<bool, anyhow::Error> {
     let mut client = BaseNodeGrpcClient::connect("http://127.0.0.1:18182").await?;
     let regex = regex::Regex::new(r"^[0-9a-fA-F]{64}$").unwrap();
 
@@ -142,6 +147,10 @@ async fn check_commitment_exists(commitment_and_signature: &str) -> Result<bool,
         let inner = utxo.unwrap();
         let features = inner.output.unwrap().features;
         if features.unwrap().output_type == 2 {
+            if is_output_hash_already_used(commitment, chat_id)? {
+                dbg!("Someone already has this commitment");
+                return Ok(false);
+            }
             return Ok(true);
         }
         // dbg!(inner.output.unwrap().features);
@@ -171,11 +180,43 @@ fn ensure_db() -> Result<(), anyhow::Error> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS users (
                   handle TEXT NOT NULL,
+                  chat_id INTEGER NOT NULL,
                   tari_proof TEXT
                   )",
         params![],
     )?;
 
+    Ok(())
+}
+
+fn is_user_verified(user_id: UserId, chat_id: ChatId) -> Result<bool, anyhow::Error> {
+    let conn = Connection::open("users.db").unwrap();
+    let mut stmt = conn
+        .prepare("SELECT * FROM users WHERE handle = ? and chat_id = ?")
+        .unwrap();
+    let mut rows = stmt.query(params![user_id.to_string(), chat_id.0]).unwrap();
+    Ok(rows.next()?.is_some())
+}
+
+fn is_output_hash_already_used(output_hash: &str, chat_id: ChatId) -> Result<bool, anyhow::Error> {
+    let conn = Connection::open("users.db").unwrap();
+    let mut stmt = conn
+        .prepare("SELECT * FROM users WHERE tari_proof = ? and chat_id = ?")
+        .unwrap();
+    let mut rows = stmt.query(params![output_hash, chat_id.0]).unwrap();
+    Ok(rows.next()?.is_some())
+}
+
+fn save_output_to_user(
+    user_id: UserId,
+    output_hash: &str,
+    chat_id: ChatId,
+) -> Result<(), anyhow::Error> {
+    let conn = Connection::open("users.db").unwrap();
+    conn.execute(
+        "INSERT INTO users (handle, tari_proof, chat_id) VALUES (?1, ?2, ?3)",
+        params![user_id.to_string(), output_hash, chat_id.0],
+    )?;
     Ok(())
 }
 
@@ -205,21 +246,48 @@ async fn main() -> Result<(), anyhow::Error> {
             Ok(())
         } else {
             if let Some(text) = message.text() {
-                dbg!("checking commitment");
-                let exists = match check_commitment_exists(text).await {
-                    Ok(exists) => exists,
-                    Err(e) => {
-                        bot.send_message(message.chat.id, format!("Error: {}", e))
+                let verify_message = Regex::new(r"^verify [0-9a-fA-F]{64}$").unwrap();
+                if verify_message.is_match(text) {
+                    let exists = match check_commitment_exists(
+                        &text.replace("verify ", ""),
+                        message.chat.id,
+                    )
+                    .await
+                    {
+                        Ok(exists) => exists,
+                        Err(e) => {
+                            bot.send_message(message.chat.id, format!("Error: {}", e))
+                                .await?;
+                            false
+                        }
+                    };
+                    if exists {
+                        save_output_to_user(
+                            message.from().unwrap().id,
+                            &text.replace("verify ", ""),
+                            message.chat.id,
+                        )
+                        .unwrap();
+                        bot.send_message(message.chat.id, "Commitment exists")
                             .await?;
-                        false
+                    } else {
+                        bot.send_message(message.chat.id, "Commitment does not exist")
+                            .await?;
                     }
-                };
-                if exists {
-                    bot.send_message(message.chat.id, "Commitment exists")
-                        .await?;
                 } else {
-                    bot.send_message(message.chat.id, "Commitment does not exist")
-                        .await?;
+                    let verified =
+                        match is_user_verified(message.from().unwrap().id, message.chat.id) {
+                            Ok(verified) => verified,
+                            Err(e) => {
+                                bot.send_message(message.chat.id, format!("Error: {}", e))
+                                    .await?;
+                                false
+                            }
+                        };
+                    if !verified {
+                        bot.send_message(message.chat.id, "You are not verified")
+                            .await?;
+                    }
                 }
             }
 
