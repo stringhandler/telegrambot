@@ -1,7 +1,11 @@
+use std::any;
+
 use dotenv::dotenv;
 use minotari_node_grpc_client::grpc::FetchMatchingUtxosRequest;
 use minotari_node_grpc_client::grpc::SearchUtxosRequest;
 use minotari_node_grpc_client::BaseNodeGrpcClient;
+use rusqlite::params;
+use rusqlite::Connection;
 use tari_crypto::commitment;
 use tari_crypto::ristretto::{RistrettoComSig, RistrettoPublicKey, RistrettoSecretKey};
 use tari_utilities::hex::Hex;
@@ -9,6 +13,7 @@ use tari_utilities::ByteArray;
 use teloxide::types::{Message, User};
 use teloxide::{prelude::*, RequestError};
 use tokio_stream::StreamExt;
+
 // #[derive(BotCommand)]
 // #[command(
 //     rename = "lowercase",
@@ -160,11 +165,27 @@ async fn check_commitment_exists(commitment_and_signature: &str) -> Result<bool,
     Ok(count_utxos > 0)
 }
 
+fn ensure_db() -> Result<(), anyhow::Error> {
+    let conn = Connection::open("users.db")?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS users (
+                  handle TEXT NOT NULL,
+                  tari_proof TEXT
+                  )",
+        params![],
+    )?;
+
+    Ok(())
+}
+
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), anyhow::Error> {
     // teloxide::enable_logging!();
     log::info!("Starting bot...");
     dotenv().ok();
+
+    ensure_db()?;
 
     let bot = Bot::from_env();
 
@@ -172,7 +193,7 @@ async fn main() {
         if let Some(new_members) = message.new_chat_members() {
             // handle_new_members(message, new_members).await
             for new_member in new_members {
-                bot.send_dice(message.chat.id).await?;
+                // bot.send_dice(message.chat.id).await?;
                 // message
                 //     .reply_to_message(format!(
                 //         "Welcome, {}! Please send a message to confirm your intent to join.",
@@ -202,9 +223,11 @@ async fn main() {
                 }
             }
 
-            bot.send_dice(message.chat.id).await?;
+            // bot.send_dice(message.chat.id).await?;
             Ok(())
         }
     })
     .await;
+
+    Ok(())
 }
