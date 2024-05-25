@@ -285,8 +285,12 @@ async fn main() -> Result<(), anyhow::Error> {
                             }
                         };
                     if !verified {
-                        bot.send_message(message.chat.id, "You are not verified")
-                            .await?;
+                        bot.send_message(
+                            message.chat.id,
+                            format!("You are not verified: Deleting: {}", text),
+                        )
+                        .await?;
+                        bot.delete_message(message.chat.id, message.id).await?;
                     }
                 }
             }
